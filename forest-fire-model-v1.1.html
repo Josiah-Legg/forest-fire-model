@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Forest Fire Model with River Zones & Jumping Fire</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #111;
+      color: #f5f5f5;
+      margin: 0;
+      padding: 0 560px 0 0; /* desktop: space for fixed canvas on the right */
+    }
+
+    .container {
+      max-width: 700px;
+      width: 100%;
+      padding: 16px;
+      box-sizing: border-box;
+    }
+
+    h1 {
+      margin-top: 0;
+      font-size: 1.3rem;
+    }
+
+    h2 {
+      margin-bottom: 4px;
+      font-size: 1.05rem;
+      margin-top: 16px;
+    }
+
+    label {
+      display: block;
+      margin-top: 8px;
+      font-size: 0.9rem;
+    }
+
+    input[type="number"],
+    input[type="text"] {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 4px 6px;
+      margin-top: 4px;
+      border-radius: 4px;
+      border: 1px solid #555;
+      background: #222;
+      color: #f5f5f5;
+    }
+
+    input[type="number"]:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    input[type="checkbox"] {
+      margin-right: 6px;
+    }
+
+    button {
+      margin-top: 10px;
+      margin-right: 6px;
+      padding: 6px 12px;
+      border-radius: 4px;
+      border: none;
+      cursor: pointer;
+      background: #2e7dd6;
+      color: white;
+      font-size: 0.9rem;
+    }
+
+    button.secondary {
+      background: #444;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+
+    .stats {
+      margin-top: 12px;
+      font-size: 0.9rem;
+      line-height: 1.6;
+    }
+
+    .canvas-wrapper {
+      position: fixed;
+      top: 50%;
+      right: 16px;
+      transform: translateY(-50%);
+      width: 512px;
+      height: 512px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    canvas {
+      background: #000;
+      image-rendering: pixelated;
+      border-radius: 4px;
+      border: 1px solid #333;
+    }
+
+    .small {
+      font-size: 0.8rem;
+      color: #aaa;
+    }
+
+    ul {
+      margin-top: 4px;
+      padding-left: 18px;
+    }
+
+    li {
+      font-size: 0.8rem;
+      color: #aaa;
+      margin-bottom: 2px;
+    }
+
+    .zone-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px 10px;
+      margin-top: 6px;
+    }
+
+    .zone-grid label {
+      margin-top: 0;
+    }
+
+    .section-box {
+      border-top: 1px solid #333;
+      margin-top: 10px;
+      padding-top: 8px;
+    }
+
+    /* ===== Mobile layout: simulation as big header, parameters scroll below ===== */
+    @media (max-width: 900px) {
+      body {
+        padding: 0;
+      }
+
+      .canvas-wrapper {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        transform: none;
+        width: 100%;
+        height: auto;
+        justify-content: center;
+        padding: 8px 0;
+        background: #111;
+        border-bottom: 1px solid #333;
+        z-index: 10;
+      }
+
+      .canvas-wrapper canvas {
+        width: 90%;
+        min-width: 90%;
+        height: auto;      /* keep aspect ratio (square) */
+        display: block;
+        margin: 0 auto;
+      }
+
+      .container {
+        max-width: 90%;
+        padding: 100px;
+        box-sizing: border-box;
+        margin: 0 auto;
+        /* leave room for the square canvas + padding */
+        margin-top: calc(100vh + 200px);
+      }
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>Forest Fire Model with River Zones & Jumping Fire</h1>
+
+  <h2>Parameters</h2>
+
+  <label>
+    <input id="animateFiresInput" type="checkbox" checked>
+    Animate Fires (1 step per frame; locks “Steps per Frame”)
+  </label>
+
+  <label>
+    Tree Growth Probability (p):
+    <input id="pInput" type="number" step="0.0001" min="0" max="1" value="0.0003">
+  </label>
+
+  <label>
+    Lightning Strike Probability (f):
+    <input id="fInput" type="number" step="0.0000001" min="0" max="1" value="0.00001">
+  </label>
+
+  <label>
+    Neighbour Reproduction Boost (r):
+    <input id="reproInput" type="number" step="0.0001" min="0" max="1" value="0.001">
+  </label>
+  <p class="small">
+    Empty cells grow trees with base probability p, plus r for each neighbouring tree (up to 8 neighbours),
+    capped at 1. This makes tree growth more likely near existing trees.
+  </p>
+
+  <label>
+    Steps per Frame (Growth):
+    <input id="spfInput" type="number" step="1" min="1" max="50000" value="1000">
+  </label>
+
+  <label>
+    Seed:
+    <input id="seedInput" type="text" placeholder="(optional integer, e.g. 12345)">
+  </label>
+
+  <div>
+    <button id="startBtn">Start</button>
+    <button id="resetBtn" class="secondary">Reset</button>
+  </div>
+
+  <div class="section-box">
+    <h2>River Buffer Zones (Ignition Dampening)</h2>
+    <p class="small">
+      Trees closer to the river are harder to ignite from burning neighbours. For a tree at distance
+      <em>d</em> (in cells) from the river, a burning neighbour only ignites it with probability equal
+      to the zone factor below. Outside all zones the factor is 1 (always ignites from a burning neighbour).
+      Factors should be between 0 (never) and 1 (always).
+    </p>
+
+    <div class="zone-grid">
+      <label>
+        Zone 1 radius (cells):
+        <input id="zone1RadiusInput" type="number" step="1" min="0" max="100" value="3">
+      </label>
+      <label>
+        Zone 1 ignition factor:
+        <input id="zone1FactorInput" type="number" step="0.01" min="0" max="1" value="0.2">
+      </label>
+
+      <label>
+        Zone 2 radius (cells):
+        <input id="zone2RadiusInput" type="number" step="1" min="0" max="100" value="6">
+      </label>
+      <label>
+        Zone 2 ignition factor:
+        <input id="zone2FactorInput" type="number" step="0.01" min="0" max="1" value="0.5">
+      </label>
+
+      <label>
+        Zone 3 radius (cells):
+        <input id="zone3RadiusInput" type="number" step="1" min="0" max="100" value="10">
+      </label>
+      <label>
+        Zone 3 ignition factor:
+        <input id="zone3FactorInput" type="number" step="0.01" min="0" max="1" value="0.8">
+      </label>
+    </div>
+
+    <p class="small">
+      Recommended: Zone 1 radius &lt; Zone 2 radius &lt; Zone 3 radius and
+      Zone 1 factor &lt; Zone 2 factor &lt; Zone 3 factor.
+    </p>
+  </div>
+
+  <div class="section-box">
+    <h2>River Fire Jump</h2>
+    <label>
+      <input id="riverJumpInput" type="checkbox">
+      Allow fire to jump across narrow parts of the river
+    </label>
+    <p class="small">
+      When enabled, fire can cross the river if there is a line of water at most a few cells wide
+      between burning trees and trees on the opposite bank.
+    </p>
+  </div>
+
+  <div class="stats">
+    <div>Timesteps (N<sub>s</sub>): <span id="stepsValue">0</span></div>
+    <div>Tree Count: <span id="treeCountValue">0</span></div>
+    <div>Tree Density (ρ): <span id="densityValue">0.00</span>%</div>
+    <div>Total Fires: <span id="totalFiresValue">0</span></div>
+  </div>
+
+  <h2>Seed & Environment</h2>
+  <p class="small">
+    The <strong>seed</strong> sets the internal pseudo-random number generator. Given the same seed and the same
+    parameters, the simulation is reproducible:
+  </p>
+  <ul>
+    <li>The wiggly river’s shape is determined by the seed.</li>
+    <li>The initial random growth of trees is determined by the seed.</li>
+    <li>Lightning strikes and fire spread follow the same sequence for a fixed seed.</li>
+  </ul>
+  <p class="small">
+    Leave the seed blank to use a fresh random seed each reset.
+  </p>
+
+  <h2>Legend</h2>
+  <ul>
+    <li>Black: empty ground</li>
+    <li>Green: tree</li>
+    <li>Orange: burning tree</li>
+    <li>Blue: river (no trees, fire only crosses if “jump” is enabled)</li>
+  </ul>
+</div>
+
+<div class="canvas-wrapper">
+  <canvas id="canvas" width="512" height="512"></canvas>
+</div>
+
+<script>
+  /* JS unchanged from the previous version */
+  const canvas = document.getElementById("canvas");
+  const ctx = canvas.getContext("2d");
+
+  const pInput = document.getElementById("pInput");
+  const fInput = document.getElementById("fInput");
+  const reproInput = document.getElementById("reproInput");
+  const spfInput = document.getElementById("spfInput");
+  const seedInput = document.getElementById("seedInput");
+  const animateFiresInput = document.getElementById("animateFiresInput");
+
+  const zone1RadiusInput = document.getElementById("zone1RadiusInput");
+  const zone2RadiusInput = document.getElementById("zone2RadiusInput");
+  const zone3RadiusInput = document.getElementById("zone3RadiusInput");
+  const zone1FactorInput = document.getElementById("zone1FactorInput");
+  const zone2FactorInput = document.getElementById("zone2FactorInput");
+  const zone3FactorInput = document.getElementById("zone3FactorInput");
+
+  const riverJumpInput = document.getElementById("riverJumpInput");
+
+  const startBtn = document.getElementById("startBtn");
+  const resetBtn = document.getElementById("resetBtn");
+
+  const stepsValue = document.getElementById("stepsValue");
+  const treeCountValue = document.getElementById("treeCountValue");
+  const densityValue = document.getElementById("densityValue");
+  const totalFiresValue = document.getElementById("totalFiresValue");
+
+  const GRID_SIZE = 128;
+  const CELL_SIZE = canvas.width / GRID_SIZE;
+
+  const EMPTY = 0;
+  const TREE = 1;
+  const BURNING = 2;
+  const WATER = 3;
+
+  let grid = createGrid(GRID_SIZE);
+  let nextGrid = createGrid(GRID_SIZE);
+  let riverDist = createNumberGrid(GRID_SIZE, Infinity);
+
+  let running = false;
+  let timestep = 0;
+  let treeCount = 0;
+  let totalFires = 0;
+  let landCells = GRID_SIZE * GRID_SIZE;
+
+  let rngState = 1;
+
+  function setSeedFromInput() {
+    const txt = seedInput.value.trim();
+    let seed;
+    if (txt === "") {
+      seed = Date.now() % 2147483647;
+    } else {
+      seed = parseInt(txt, 10);
+      if (!Number.isFinite(seed) || seed <= 0) seed = 1;
+    }
+    rngState = seed % 2147483647;
+    if (rngState === 0) rngState = 1;
+  }
+
+  function rand() {
+    rngState = (rngState * 48271) % 2147483647;
+    return (rngState - 1) / 2147483646;
+  }
+
+  function createGrid(n) {
+    const g = new Array(n);
+    for (let y = 0; y < n; y++) {
+      g[y] = new Array(n).fill(EMPTY);
+    }
+    return g;
+  }
+
+  function createNumberGrid(n, initialValue) {
+    const g = new Array(n);
+    for (let y = 0; y < n; y++) {
+      g[y] = new Array(n).fill(initialValue);
+    }
+    return g;
+  }
+
+  function clearGrid() {
+    for (let y = 0; y < GRID_SIZE; y++) {
+      for (let x = 0; x < GRID_SIZE; x++) {
+        grid[y][x] = EMPTY;
+      }
+    }
+  }
+
+  function generateRiver() {
+    let x = Math.floor(GRID_SIZE * (0.3 + 0.4 * rand()));
+    let dir = 0;
+    let baseHalfWidth = 2 + Math.floor(2 * rand());
+    landCells = GRID_SIZE * GRID_SIZE;
+
+    for (let y = 0; y < GRID_SIZE; y++) {
+      let halfWidth = baseHalfWidth + (rand() < 0.5 ? 0 : (rand() < 0.5 ? -1 : 1));
+      if (halfWidth < 1) halfWidth = 1;
+      if (halfWidth > 4) halfWidth = 4;
+
+      for (let dx = -halfWidth; dx <= halfWidth; dx++) {
+        const xx = x + dx;
+        if (xx >= 0 && xx < GRID_SIZE) {
+          if (grid[y][xx] !== WATER) {
+            grid[y][xx] = WATER;
+            landCells--;
+          }
+        }
+      }
+
+      const r = rand();
+      if (r < 0.25) dir -= 1;
+      else if (r > 0.75) dir += 1;
+      if (dir < -1) dir = -1;
+      if (dir > 1) dir = 1;
+
+      if (rand() < 0.05) {
+        dir = (rand() < 0.5) ? -1 : 1;
+      }
+
+      x += dir;
+
+      if (x < 4) x = 4;
+      if (x > GRID_SIZE - 5) x = GRID_SIZE - 5;
+    }
+  }
+
+  function computeRiverDistance() {
+    riverDist = createNumberGrid(GRID_SIZE, Infinity);
+    const queue = [];
+
+    for (let y = 0; y < GRID_SIZE; y++) {
+      for (let x = 0; x < GRID_SIZE; x++) {
+        if (grid[y][x] === WATER) {
+          riverDist[y][x] = 0;
+          queue.push({ x, y });
+        }
+      }
+    }
+
+    const dirs = [
+      { dx: 1, dy: 0 },
+      { dx: -1, dy: 0 },
+      { dx: 0, dy: 1 },
+      { dx: 0, dy: -1 }
+    ];
+
+    while (queue.length > 0) {
+      const { x, y } = queue.shift();
+      const d = riverDist[y][x];
+
+      for (const { dx, dy } of dirs) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || nx >= GRID_SIZE || ny < 0 || ny >= GRID_SIZE) continue;
+        const nd = d + 1;
+        if (nd < riverDist[ny][nx]) {
+          riverDist[ny][nx] = nd;
+          queue.push({ x: nx, y: ny });
+        }
+      }
+    }
+  }
+
+  function getZoneFactor(x, y) {
+    const d = riverDist[y][x];
+    if (!Number.isFinite(d)) return 1;
+
+    const z1r = Number(zone1RadiusInput.value) || 0;
+    const z2r = Number(zone2RadiusInput.value) || 0;
+    const z3r = Number(zone3RadiusInput.value) || 0;
+    const z1f = clamp01(Number(zone1FactorInput.value));
+    const z2f = clamp01(Number(zone2FactorInput.value));
+    const z3f = clamp01(Number(zone3FactorInput.value));
+
+    if (d <= z1r) return z1f;
+    if (d <= z2r) return z2f;
+    if (d <= z3r) return z3f;
+    return 1;
+  }
+
+  function clamp01(v) {
+    if (!Number.isFinite(v)) return 1;
+    if (v < 0) return 0;
+    if (v > 1) return 1;
+    return v;
+  }
+
+  function singleStep() {
+    const p = Number(pInput.value) || 0;
+    const f = Number(fInput.value) || 0;
+    const r = Number(reproInput.value) || 0;
+    const allowJump = riverJumpInput.checked;
+
+    let newTreeCount = 0;
+    let firesThisStep = 0;
+
+    for (let y = 0; y < GRID_SIZE; y++) {
+      for (let x = 0; x < GRID_SIZE; x++) {
+        const state = grid[y][x];
+
+        if (state === WATER) {
+          nextGrid[y][x] = WATER;
+          continue;
+        }
+
+        if (state === BURNING) {
+          nextGrid[y][x] = EMPTY;
+        } else if (state === TREE) {
+          const burningNeighbour = hasBurningNeighbourWithJump(x, y, allowJump);
+          let caughtFire = false;
+
+          if (burningNeighbour) {
+            const zoneFactor = getZoneFactor(x, y);
+            if (rand() < zoneFactor) {
+              caughtFire = true;
+            }
+          }
+
+          if (caughtFire || rand() < f) {
+            nextGrid[y][x] = BURNING;
+            firesThisStep++;
+          } else {
+            nextGrid[y][x] = TREE;
+            newTreeCount++;
+          }
+        } else {
+          const neighbourTrees = countTreeNeighbours(x, y);
+          let growthProb = p + r * neighbourTrees;
+          if (growthProb > 1) growthProb = 1;
+          if (rand() < growthProb) {
+            nextGrid[y][x] = TREE;
+            newTreeCount++;
+          } else {
+            nextGrid[y][x] = EMPTY;
+          }
+        }
+      }
+    }
+
+    const tmp = grid;
+    grid = nextGrid;
+    nextGrid = tmp;
+
+    treeCount = newTreeCount;
+    totalFires += firesThisStep;
+    timestep++;
+  }
+
+  function hasBurningNeighbourWithJump(x, y, allowJump) {
+    if (y > 0 && grid[y - 1][x] === BURNING) return true;
+    if (y < GRID_SIZE - 1 && grid[y + 1][x] === BURNING) return true;
+    if (x > 0 && grid[y][x - 1] === BURNING) return true;
+    if (x < GRID_SIZE - 1 && grid[y][x + 1] === BURNING) return true;
+
+    if (!allowJump) return false;
+
+    const maxJump = 4;
+
+    const dirs = [
+      { dx: 1, dy: 0 },
+      { dx: -1, dy: 0 },
+      { dx: 0, dy: 1 },
+      { dx: 0, dy: -1 }
+    ];
+
+    for (const { dx, dy } of dirs) {
+      let sx = x + dx;
+      let sy = y + dy;
+      let steps = 1;
+      let seenWater = false;
+
+      while (sx >= 0 && sx < GRID_SIZE && sy >= 0 && sy < GRID_SIZE && steps <= maxJump) {
+        const sState = grid[sy][sx];
+
+        if (sState === WATER) {
+          seenWater = true;
+        } else {
+          if (seenWater && sState === BURNING) {
+            return true;
+          }
+          break;
+        }
+
+        sx += dx;
+        sy += dy;
+        steps++;
+      }
+    }
+
+    return false;
+  }
+
+  function countTreeNeighbours(x, y) {
+    let count = 0;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const xx = x + dx;
+        const yy = y + dy;
+        if (xx < 0 || xx >= GRID_SIZE || yy < 0 || yy >= GRID_SIZE) continue;
+        if (grid[yy][xx] === TREE) count++;
+      }
+    }
+    return count;
+  }
+
+  function drawGrid() {
+    for (let y = 0; y < GRID_SIZE; y++) {
+      for (let x = 0; x < GRID_SIZE; x++) {
+        const state = grid[y][x];
+        if (state === EMPTY) {
+          ctx.fillStyle = "#000000";
+        } else if (state === TREE) {
+          ctx.fillStyle = "#00a000";
+        } else if (state === BURNING) {
+          ctx.fillStyle = "#ff4000";
+        } else if (state === WATER) {
+          ctx.fillStyle = "#0050ff";
+        }
+        ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+      }
+    }
+  }
+
+  function updateStats() {
+    stepsValue.textContent = String(timestep);
+    treeCountValue.textContent = String(treeCount);
+    const land = Math.max(1, landCells);
+    const density = (treeCount / land) * 100;
+    densityValue.textContent = density.toFixed(2);
+    totalFiresValue.textContent = String(totalFires);
+  }
+
+  function loop() {
+    if (running) {
+      const animateFires = animateFiresInput.checked;
+      const stepsPerFrame = animateFires ? 1 : Math.max(1, Number(spfInput.value) || 1);
+
+      for (let i = 0; i < stepsPerFrame; i++) {
+        singleStep();
+      }
+
+      drawGrid();
+      updateStats();
+    }
+    requestAnimationFrame(loop);
+  }
+
+  function updateSpfDisabledState() {
+    if (animateFiresInput.checked) {
+      spfInput.disabled = true;
+      spfInput.title = "Steps per frame is locked because Animate Fires is on.";
+    } else {
+      spfInput.disabled = false;
+      spfInput.title = "";
+    }
+  }
+
+  function resetSimulation() {
+    setSeedFromInput();
+    clearGrid();
+    generateRiver();
+    computeRiverDistance();
+    timestep = 0;
+    treeCount = 0;
+    totalFires = 0;
+    drawGrid();
+    updateStats();
+  }
+
+  startBtn.addEventListener("click", () => {
+    running = !running;
+    startBtn.textContent = running ? "Pause" : "Start";
+  });
+
+  resetBtn.addEventListener("click", () => {
+    running = false;
+    startBtn.textContent = "Start";
+    resetSimulation();
+  });
+
+  animateFiresInput.addEventListener("change", updateSpfDisabledState);
+
+  updateSpfDisabledState();
+  resetSimulation();
+  requestAnimationFrame(loop);
+</script>
+</body>
+</html>
