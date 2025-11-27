@@ -21,5 +21,5 @@ This project however was more ispired by the forest fire model itself rather tha
   - Lightning strikes and fire spread follow the same sequence for a fixed seed.
   
 ## Links
-[Veritasium's Forest Fire Model (Drossel–Schwabl)](https://www.veritasium.com/simulation5)
+[Veritasium's Forest Fire Model (Drossel–Schwabl)](https://www.veritasium.com/simulation5)  
 [My Adapted Model](josiahlegg.com/forest-fire-model-v1.1)
