@@ -23,4 +23,4 @@ This project however was more ispired by the forest fire model itself rather tha
 ## Links  
 - [Veritasium's Forest Fire Model (Drossel–Schwabl)](https://www.veritasium.com/simulation5)
   
-- [My Adapted Model](josiahlegg.com/forest-fire-model-v1.1)
+- [My Adapted Model](https://josiahlegg.com/forest-fire-model-v1.1)
